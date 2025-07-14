@@ -7,8 +7,9 @@ import requests
 import random
 import string
 
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = 23147459
+API_HASH = "7ea3e357441507277e33bd1f7c6d8847"
+BOT_TOKEN = ":"
 
 # States
 ASK_EMAIL = 0
