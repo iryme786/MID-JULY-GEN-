@@ -1,10 +1,11 @@
-import os
-import re
-import time
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from fastapi import FastAPI
+import uvicorn
+import threading
 import requests
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
-from dotenv import load_dotenv
+import random
+import string
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
