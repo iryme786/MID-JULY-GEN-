@@ -3,100 +3,64 @@ from pyrogram.types import Message
 from fastapi import FastAPI
 import uvicorn
 import threading
-import requests
-import random
-import string
+import requests, string, random
 
+# Telegram Bot Config
 API_ID = 23147459
 API_HASH = "7ea3e357441507277e33bd1f7c6d8847"
-BOT_TOKEN = ":"
+BOT_TOKEN = "7890501259:AAH0FNZtJa5jabWOuXrMtOS5icOaYQfzDDs"
 
-# States
-ASK_EMAIL = 0
-user_email_map = {}
+bot = Client("classplus_token_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+web = FastAPI()
+user_state = {}
 
-def extract_username_domain(email):
-    if "@" not in email:
-        return None, None
-    parts = email.split("@")
-    return parts[0], parts[1]
+@bot.on_message(filters.command("start"))
+async def start_handler(client, message: Message):
+    await message.reply_text("📧 Please enter your temp mail:")
+    user_state[message.from_user.id] = {"step": "email"}
 
-def wait_for_otp(username, domain):
-    for _ in range(30):
-        inbox_url = f"https://www.1secmail.com/api/v1/?action=getMessages&login={username}&domain={domain}"
-        resp = requests.get(inbox_url)
-        messages = resp.json()
-        if messages:
-            msg_id = messages[0]["id"]
-            msg_url = f"https://www.1secmail.com/api/v1/?action=readMessage&login={username}&domain={domain}&id={msg_id}"
-            msg_data = requests.get(msg_url).json()
-            body = msg_data.get("body", "")
-            otp_match = re.search(r"\b(\d{4,6})\b", body)
-            if otp_match:
-                return otp_match.group(1)
-        time.sleep(2)
-    return None
+@bot.on_message(filters.text)
+async def handle_message(client, message: Message):
+    uid = message.from_user.id
+    if uid not in user_state:
+        return await message.reply("ℹ️ Please type /start first.")
 
-def verify_classplus(email, otp):
-    payload = {
-        "email": email,
-        "otp": otp,
-        "countryCode": "+91",
-        "userType": 0
-    }
-    headers = {
-        "x-application-id": "classplus",
-        "content-type": "application/json"
-    }
-    r = requests.post("https://api.classplusapp.com/v2/customer/otp/verify", json=payload, headers=headers)
-    if r.status_code == 200:
-        return r.json().get("data", {}).get("accessToken")
-    return None
+    state = user_state[uid]
+    if state["step"] == "email":
+        user_state[uid] = {"step": "otp", "email": message.text.strip()}
+        await message.reply("📩 OTP sent to your email. Please enter the OTP:")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send your temp email (e.g. something@1secmail.com or @kzccv.com or @datingso.com):")
-    return ASK_EMAIL
+    elif state["step"] == "otp":
+        otp = message.text.strip()
+        email = state["email"]
+        device_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
+        headers = {
+            "User-Agent": "okhttp/3.12.1",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "deviceId": device_id,
+            "otp": otp,
+            "email": email
+        }
 
-async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    email = update.message.text.strip()
-    username, domain = extract_username_domain(email)
-    if not username or not domain:
-        await update.message.reply_text("⚠️ Invalid email format. Please send a valid email like name@domain.com")
-        return ASK_EMAIL
+        try:
+            r = requests.post("https://api.classplusapp.com/v2/user/loginWithEmail", json=payload, headers=headers)
+            if r.status_code == 200 and "data" in r.json():
+                token = r.json()["data"]["token"]
+                await message.reply(f"🟢 <b>Your Token has been Generated :</b>\n<code>{token}</code>", parse_mode="html")
+            else:
+                await message.reply("❌ Invalid OTP or email.")
+        except Exception as e:
+            await message.reply(f"⚠️ Error: {str(e)}")
+        user_state.pop(uid)
 
-    user_email_map[update.effective_user.id] = (email, username, domain)
+@web.get("/")
+def home():
+    return {"status": "Bot is running", "message": "Visit me on Telegram!"}
 
-    await update.message.reply_text(f"✅ Using email: <code>{email}</code>\nNow send OTP to this email from Classplus.", parse_mode="HTML")
-    await update.message.reply_text("⏳ Waiting for OTP...")
+def run():
+    bot.run()
 
-    otp = wait_for_otp(username, domain)
-    if otp:
-        await update.message.reply_text(f"🔑 OTP received: <code>{otp}</code>\nVerifying...", parse_mode="HTML")
-        token = verify_classplus(email, otp)
-        if token:
-            await update.message.reply_text(f"🎉 Token:\n<code>{token}</code>", parse_mode="HTML")
-        else:
-            await update.message.reply_text("❌ OTP verification failed.")
-    else:
-        await update.message.reply_text("❌ OTP not received. Try again.")
-
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Cancelled.")
-    return ConversationHandler.END
-
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            ASK_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_email)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-
-    app.add_handler(conv)
-    print("Bot is running...")
-    app.run_polling()
+threading.Thread(target=run).start()
+uvicorn.run(web, host="0.0.0.0", port=8000)
